@@ -2,8 +2,18 @@
 
 setup() {
     # Install az cli
-    curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+    if ! $(command -v az) >/dev/null 2>&1
+    then
+        echo "Azure CLI could not be found"
+        echo "Installing Azure CLI"
+        curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+    else
+        echo "Azure CLI found, proceeding to log in"
+        az login --use-device-code
+        echo "You're logged in."
+    fi
     # Login
-    az login --use-device-code
-    echo "You're logged in."
+    
 }
+
+setup
