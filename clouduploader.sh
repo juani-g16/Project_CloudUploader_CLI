@@ -1,5 +1,6 @@
 #! /bin/bash
 
+#---------------------------------SETUP AND SCRIPT USSAGE------------------------------------#
 setup() {
     # Install az cli if it's not already installed
     if ! command -v az >/dev/null 2>&1; then
@@ -26,31 +27,34 @@ check_file_exists() {
     fi
 
     if [ -f "$1" ]; then
-        echo "File $1 exists"
+        echo "File '$1' exists"
     else
-        echo "File $1 doesn't exist."
+        echo "File '$1' doesn't exist."
         echo "Check for correct path/filename"
     fi
 }
+#-------------------------------END SETUP AND SCRIPT USSAGE-----------------------------------#
 
-# Print out 5 recommended regions
+#----------------------------------------REGION SETUP-----------------------------------------#
+# Print out 10 recommended regions
 print_out_regions() {
-    regions_array=($(az account list-locations --query "[?metadata.regionCategory=='Recommended'].{Name:name}" -o tsv | head -n 5))
+    mapfile -t regions_array < <(az account list-locations --query "[?metadata.regionCategory=='Recommended'].{Name:name}" -o tsv | head -n 10)
     for i in "${regions_array[@]}"; do
         echo "$i"
     done
 }
 
 # Select a region
-check_region() {
+select_region() {
     local region_exists=false
+    echo Please, select a region from the list.
     while [[ "$region_exists" = false ]]; do
         print_out_regions
         read -rp "Enter your region: " selected_region
         for j in "${regions_array[@]}"; do
             if [[ "$selected_region" == "$j" ]]; then
                 region_exists=true
-                echo "Selected region exists"
+                echo "Region '$selected_region' correctly selected"
                 break
             else
                 continue
@@ -59,20 +63,68 @@ check_region() {
     done
 }
 
-select_resource_group() {
-    echo "Current resource group list"
-    list_resource_groups
+#-------------------------------------END REGION SETUP-----------------------------------------#
+
+#---------------------------------RESOURCE GROUP SETUP-----------------------------------------#
+#Print out all resource groups
+print_out_rg() {
+    mapfile -t rg_array < <(az group list --query "[].{Name:name}" -o tsv)
+    for i in "${rg_array[@]}"; do
+        echo "$i"
+    done
+}
+
+# Select already existent resource group
+check_rg_list() {
+    local rg_exists=false
+    while [[ "$rg_exists" = false ]]; do
+        print_out_rg
+        read -rp "Enter your resource group from the list: " resource_group
+        for j in "${rg_array[@]}"; do
+            if [[ "$resource_group" == "$j" ]]; then
+                rg_exists=true
+                echo "Resource group correctly selected."
+                break
+            else
+                continue
+            fi
+        done
+    done
+}
+
+# Check if resource group already exists.
+check_rg_exists() {
+    while true; do
+        read -rp "Enter a name for your resource group: " resource_group
+        if [ "$(az group exists --name "$resource_group")" = true ]; then
+            echo "The group '$resource_group' already exists, please provide another name..."
+        else
+            echo "The group name '$resource_group' can be used."
+            break
+        fi
+    done
+}
+
+# Create the resource group
+create_rg() {
+    echo "Creating resource group: '$resource_group' in '$selected_region'"
+    az group create -g "$resource_group" -l "$selected_region" | grep provisioningState
+}
+
+#Create new resource group or select one from list
+select_rg() {
     while true; do
         read -rp "Create new resource group? (yes|no): " rg_answer
         case $rg_answer in
         yes | YES | Yes | y)
             echo "You answered yes."
-            check_resource_group_exists
+            check_rg_exists
+            create_rg
             break
             ;;
         no | NO | No | n)
             echo "You answered no. Select resource group from list."
-            check_resource_group_not_exists
+            check_rg_list
             break
             ;;
         *)
@@ -80,52 +132,82 @@ select_resource_group() {
             ;;
         esac
     done
-
 }
 
-# Check if resource group already exists.
-check_resource_group_exists() {
+#-------------------------------------END RESOURCE GROUP SETUP-----------------------------------#
+
+#--------------------------------------STORAGE ACCOUNT SETUP-------------------------------------#
+#Print out all storage accounts
+print_out_sa() {
+    mapfile -t sa_array < <(az storage account list --query "[].{Name:name}" -o tsv)
+    for i in "${sa_array[@]}"; do
+        echo "$i"
+    done
+}
+
+# Select storage account group
+check_sa_list() {
+    local sa_exists=false
+    while [[ "$sa_exists" = false ]]; do
+        print_out_sa
+        read -rp "Enter storage account from the list: " storage_account
+        for j in "${sa_array[@]}"; do
+            if [[ "$storage_account" == "$j" ]]; then
+                sa_exists=true
+                echo "Storage account '$storage_account' correctly selected."
+                break
+            else
+                continue
+            fi
+        done
+    done
+}
+
+#Check if a storage account name is available to use.
+check_sa_not_available() {
     while true; do
-        read -rp "Enter a name for you resource group: " resource_group
-        if [ "$(az group exists --name "$resource_group")" = true ]; then
-            echo "The group $resource_group exists in $selected_region, please provide another name..."
+        read -rp "Enter a name for your storage account: " storage_account
+        if [ "$(az storage account check-name --name "$storage_account" --query nameAvailable)" = false ]; then
+            echo "The storage account '$storage_account' already exists and it's not available, please provide another name..."
         else
+            echo "The selected storage account '$storage_account' is available to use"
             break
         fi
     done
 }
 
-check_resource_group_not_exists() {
+#Create new storage account (default values)
+create_sa() {
+    echo "asas"
+}
+
+#Create new storage account or select one from list
+select_sa() {
     while true; do
-        read -rp "Enter a name for you resource group: " resource_group
-        if [ "$(az group exists --name "$resource_group")" = false ]; then
-            echo "The group $resource_group doesn't exists in $selected_region, please select one from the list..."
-        else
+        read -rp "Create new storage account? (yes|no): " sa_answer
+        case $sa_answer in
+        yes | YES | Yes | y)
+            echo "You answered yes."
+            check_sa_not_available
+            create_sa
             break
-        fi
+            ;;
+        no | NO | No | n)
+            echo "You answered no. Select storage account from list."
+            check_sa_list
+            break
+            ;;
+        *)
+            echo "Invalid input. Only 'yes' or 'no' is accepted."
+            ;;
+        esac
     done
 }
 
-# Create the resource group
-create_resource_group() {
-    echo "Creating resource group: $resource_group in $selected_region"
-    az group create -g $resource_group -l $selected_region | grep provisioningState
-}
+#-----------------------------------END STORAGE ACCOUNT SETUP-------------------------------------#
 
-#List all resource groups
-list_resource_groups() {
-    az group list -o table
-    echo
-}
-
-setup
-
+#setup
 #check_file_exists $1
-
-#check_region
-# list_resource_groups
-# check_resource_group
-# create_resource_group
-# list_resource_groups
-
-select_resource_group
+select_region
+select_rg
+select_sa
