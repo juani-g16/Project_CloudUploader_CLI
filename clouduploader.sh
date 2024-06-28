@@ -178,7 +178,9 @@ check_sa_not_available() {
 
 #Create new storage account (default values)
 create_sa() {
-    echo "asas"
+    echo "Creating storage account with name '$storage_account'"
+    az storage account create -n "$storage_account" -g "$resource_group" -l "$selected_region" --sku Standard_LRS
+    echo Storage account correctly created.
 }
 
 #Create new storage account or select one from list
