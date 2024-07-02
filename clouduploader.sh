@@ -75,10 +75,9 @@ print_out_rg() {
 }
 
 # Select already existent resource group
-check_rg_list() {
+select_rg_from_list() {
     local rg_exists=false
     while [[ "$rg_exists" = false ]]; do
-        print_out_rg
         read -rp "Enter your resource group from the list: " resource_group
         for j in "${rg_array[@]}"; do
             if [[ "$resource_group" == "$j" ]]; then
@@ -93,7 +92,7 @@ check_rg_list() {
 }
 
 # Check if resource group already exists.
-check_rg_exists() {
+check_rg_name_available() {
     while true; do
         read -rp "Enter a name for your resource group: " resource_group
         if [ "$(az group exists --name "$resource_group")" = true ]; then
@@ -112,26 +111,34 @@ create_rg() {
 }
 
 #Create new resource group or select one from list
-select_rg() {
-    while true; do
-        read -rp "Create new resource group? (yes|no): " rg_answer
-        case $rg_answer in
-        yes | YES | Yes | y)
-            echo "You answered yes."
-            check_rg_exists
-            create_rg
-            break
-            ;;
-        no | NO | No | n)
-            echo "You answered no. Select resource group from list."
-            check_rg_list
-            break
-            ;;
-        *)
-            echo "Invalid input. Only 'yes' or 'no' is accepted."
-            ;;
-        esac
-    done
+rg_setup() {
+    echo List of currently available resource groups.
+    print_out_rg
+    if [ ${#rg_array[@]} -eq 0 ]; then
+        echo "There is no resource group on the list. Please create one."
+        check_rg_name_available
+        create_rg
+    else
+        while true; do
+            read -rp "Create new resource group? (yes|no): " rg_answer
+            case $rg_answer in
+            yes | YES | Yes | y)
+                echo "You answered yes."
+                check_rg_name_available
+                create_rg
+                break
+                ;;
+            no | NO | No | n)
+                echo "You answered no. Select resource group from list."
+                select_rg_from_list
+                break
+                ;;
+            *)
+                echo "Invalid input. Only 'yes' or 'no' is accepted."
+                ;;
+            esac
+        done
+    fi
 }
 
 #-------------------------------------END RESOURCE GROUP SETUP-----------------------------------#
@@ -179,37 +186,147 @@ check_sa_not_available() {
 #Create new storage account (default values)
 create_sa() {
     echo "Creating storage account with name '$storage_account'"
-    az storage account create -n "$storage_account" -g "$resource_group" -l "$selected_region" --sku Standard_LRS
+    az storage account create -n "$storage_account" -g "$resource_group" -l "$selected_region" --sku Standard_LRS | grep provisioningState
     echo Storage account correctly created.
 }
 
 #Create new storage account or select one from list
-select_sa() {
-    while true; do
-        read -rp "Create new storage account? (yes|no): " sa_answer
-        case $sa_answer in
-        yes | YES | Yes | y)
-            echo "You answered yes."
-            check_sa_not_available
-            create_sa
-            break
-            ;;
-        no | NO | No | n)
-            echo "You answered no. Select storage account from list."
-            check_sa_list
-            break
-            ;;
-        *)
-            echo "Invalid input. Only 'yes' or 'no' is accepted."
-            ;;
-        esac
+sa_setup() {
+    echo List of currently available storage accounts.
+    print_out_sa
+    if [ ${#sa_array[@]} -eq 0 ]; then
+        echo "There is no storage account on the list. Please create one."
+        check_sa_not_available
+        create_sa
+    else
+        while true; do
+            read -rp "Create new storage account? (yes|no): " sa_answer
+            case $sa_answer in
+            yes | YES | Yes | y)
+                echo "You answered yes."
+                check_sa_not_available
+                create_sa
+                break
+                ;;
+            no | NO | No | n)
+                echo "You answered no. Select storage account from list."
+                check_sa_list
+                break
+                ;;
+            *)
+                echo "Invalid input. Only 'yes' or 'no' is accepted."
+                ;;
+            esac
+        done
+    fi
+}
+#-----------------------------------END STORAGE ACCOUNT SETUP-------------------------------------#
+
+#------------------------------------------CONTAINER SETUP----------------------------------------#
+#Rettrieve storage account keys list
+retrieve_sa_keys() {
+    mapfile -t keys_array < <(az storage account keys list -n "$storage_account" --query "[].{Value:value}" -o tsv)
+}
+
+#Print out all containers (only first key is used)
+print_out_containers() {
+    retrieve_sa_keys
+    mapfile -t containers_array < <(az storage container list --account-name "$storage_account" --account-key "${keys_array[0]}" --query "[].{Name:name}" -o tsv)
+    for i in "${containers_array[@]}"; do
+        echo "$i"
     done
 }
 
-#-----------------------------------END STORAGE ACCOUNT SETUP-------------------------------------#
+# Select container from storage account
+check_containers_list() {
+    local container_exists=false
+    while [[ "$container_exists" = false ]]; do
+        read -rp "Enter container name from the list: " container
+        for j in "${containers_array[@]}"; do
+            if [[ "$container" == "$j" ]]; then
+                container_exists=true
+                echo "Container '$container' correctly selected."
+                break
+            else
+                continue
+            fi
+        done
+    done
+}
 
-#setup
-#check_file_exists $1
+#Check if a container name is available to use.
+check_container_not_available() {
+    while true; do
+        read -rp "Enter a name for your container: " container
+        if [ "$(az storage container exists --account-name "$storage_account" --account-key "${keys_array[0]}" --name "$container")" = false ]; then
+            echo "The container name '$container' already exists and it's not available, please provide another name..."
+        else
+            echo "The selected container name '$container' is available to use"
+            break
+        fi
+    done
+}
+
+create_container() {
+    echo "Creating storage account with name '$container'"
+    az storage container create -n "$container" --account-name "$storage_account" --account-key "${keys_array[0]}"
+    echo Container correctly created.
+}
+
+#Create new container or select one from list
+container_setup() {
+    retrieve_sa_keys
+    echo List of currently available containers.
+    print_out_containers
+    if [ ${#containers_array[@]} -eq 0 ]; then
+        echo "There is no container on the list. Please create one."
+        check_container_not_available
+        create_container
+    else
+        while true; do
+            read -rp "Create new container? (yes|no): " cont_answer
+            case $cont_answer in
+            yes | YES | Yes | y)
+                echo "You answered yes."
+                check_container_not_available
+                create_container
+                break
+                ;;
+            no | NO | No | n)
+                echo "You answered no. Select container from list."
+                check_containers_list
+                break
+                ;;
+            *)
+                echo "Invalid input. Only 'yes' or 'no' is accepted."
+                ;;
+            esac
+        done
+    fi
+}
+#---------------------------------------END CONTAINER SETUP---------------------------------------#
+
+#---------------------------------------FILE UPLOAD SETUP------------------------------------------#
+upload_file() {
+    while true; do
+        read -rp "Choose a name for your blob: " blob_name
+        blob_exists=$(az storage blob exists --account-key "${keys_array[0]}" --account-name "$storage_account" --container-name "$container" --name "$blob_name" -o tsv)
+        if [[ $blob_exists == "True" ]]; then
+            echo "The blob name is already taken, choose another"
+        else
+            break
+        fi
+    done
+
+    az storage blob upload --account-name "$storage_account" --account-key "${keys_array[0]}" --container-name "$container" --file "$1" --name "$blob_name"
+}
+
+#---------------------------------------END FILE UPLOAD SETUP---------------------------------------#
+
+setup
+check_file_exists "$@"
 select_region
-select_rg
-select_sa
+rg_setup
+sa_setup
+container_setup
+upload_file "$@"
