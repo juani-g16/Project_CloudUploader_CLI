@@ -55,6 +55,7 @@ select_region() {
             if [[ "$selected_region" == "$j" ]]; then
                 region_exists=true
                 echo "Region '$selected_region' correctly selected"
+                echo
                 break
             else
                 continue
@@ -78,11 +79,12 @@ print_out_rg() {
 select_rg_from_list() {
     local rg_exists=false
     while [[ "$rg_exists" = false ]]; do
-        read -rp "Enter your resource group from the list: " resource_group
+        read -rp "Select resource group from list: " resource_group
         for j in "${rg_array[@]}"; do
             if [[ "$resource_group" == "$j" ]]; then
                 rg_exists=true
                 echo "Resource group correctly selected."
+                echo
                 break
             else
                 continue
@@ -108,6 +110,7 @@ check_rg_name_available() {
 create_rg() {
     echo "Creating resource group: '$resource_group' in '$selected_region'"
     az group create -g "$resource_group" -l "$selected_region" | grep provisioningState
+    echo
 }
 
 #Create new resource group or select one from list
@@ -122,14 +125,14 @@ rg_setup() {
         while true; do
             read -rp "Create new resource group? (yes|no): " rg_answer
             case $rg_answer in
-            yes | YES | Yes | y)
+            yes | YES | Yes | y | Y)
                 echo "You answered yes."
                 check_rg_name_available
                 create_rg
                 break
                 ;;
-            no | NO | No | n)
-                echo "You answered no. Select resource group from list."
+            no | NO | No | n | N)
+                echo "You answered no."
                 select_rg_from_list
                 break
                 ;;
@@ -156,12 +159,12 @@ print_out_sa() {
 check_sa_list() {
     local sa_exists=false
     while [[ "$sa_exists" = false ]]; do
-        print_out_sa
-        read -rp "Enter storage account from the list: " storage_account
+        read -rp "Select storage account from list: " storage_account
         for j in "${sa_array[@]}"; do
             if [[ "$storage_account" == "$j" ]]; then
                 sa_exists=true
                 echo "Storage account '$storage_account' correctly selected."
+                echo
                 break
             else
                 continue
@@ -187,7 +190,7 @@ check_sa_not_available() {
 create_sa() {
     echo "Creating storage account with name '$storage_account'"
     az storage account create -n "$storage_account" -g "$resource_group" -l "$selected_region" --sku Standard_LRS | grep provisioningState
-    echo Storage account correctly created.
+    echo
 }
 
 #Create new storage account or select one from list
@@ -202,14 +205,14 @@ sa_setup() {
         while true; do
             read -rp "Create new storage account? (yes|no): " sa_answer
             case $sa_answer in
-            yes | YES | Yes | y)
+            yes | YES | Yes | y | Y)
                 echo "You answered yes."
                 check_sa_not_available
                 create_sa
                 break
                 ;;
-            no | NO | No | n)
-                echo "You answered no. Select storage account from list."
+            no | NO | No | n | N)
+                echo "You answered no."
                 check_sa_list
                 break
                 ;;
@@ -241,11 +244,12 @@ print_out_containers() {
 check_containers_list() {
     local container_exists=false
     while [[ "$container_exists" = false ]]; do
-        read -rp "Enter container name from the list: " container
+        read -rp "Select container from list: " container
         for j in "${containers_array[@]}"; do
             if [[ "$container" == "$j" ]]; then
                 container_exists=true
                 echo "Container '$container' correctly selected."
+                echo
                 break
             else
                 continue
@@ -270,7 +274,7 @@ check_container_not_available() {
 create_container() {
     echo "Creating storage account with name '$container'"
     az storage container create -n "$container" --account-name "$storage_account" --account-key "${keys_array[0]}"
-    echo Container correctly created.
+    echo
 }
 
 #Create new container or select one from list
@@ -286,14 +290,14 @@ container_setup() {
         while true; do
             read -rp "Create new container? (yes|no): " cont_answer
             case $cont_answer in
-            yes | YES | Yes | y)
+            yes | YES | Yes | y | Y)
                 echo "You answered yes."
                 check_container_not_available
                 create_container
                 break
                 ;;
-            no | NO | No | n)
-                echo "You answered no. Select container from list."
+            no | NO | No | n | N)
+                echo "You answered no."
                 check_containers_list
                 break
                 ;;
@@ -308,25 +312,63 @@ container_setup() {
 
 #---------------------------------------FILE UPLOAD SETUP------------------------------------------#
 upload_file() {
-    while true; do
-        read -rp "Choose a name for your blob: " blob_name
-        blob_exists=$(az storage blob exists --account-key "${keys_array[0]}" --account-name "$storage_account" --container-name "$container" --name "$blob_name" -o tsv)
-        if [[ $blob_exists == "True" ]]; then
-            echo "The blob name is already taken, choose another"
-        else
-            break
-        fi
-    done
+    file=$(basename -- "$1")
+    name=$file
+    overwrite=true
+    skip=false
 
-    az storage blob upload --account-name "$storage_account" --account-key "${keys_array[0]}" --container-name "$container" --file "$1" --name "$blob_name"
+    if [ "$(az storage blob exists --account-key "${keys_array[0]}" --account-name "$storage_account" --container-name "$container" --name "$file" --query "exists")" == true ]; then
+        echo There is already a file with the same name. Do you wish to:
+        echo "(O)overwrite the file"
+        echo "(R)ename the file"
+        echo "(S)kip the file"
+        while true; do
+            read -rp "Option: " file_answer
+            case $file_answer in
+            o | O | Overwrite | overwrite)
+                overwrite=true
+                break
+                ;;
+            r | R | rename | Remane)
+                read -rp "Choose new file name: " name
+                break
+                ;;
+            s | S | skip | Skip)
+                echo "File upload canceled."
+                skip=true
+                break
+                ;;
+            *)
+                echo "Invalid answer. Select an option from the list."
+                ;;
+            esac
+        done
+    fi
+
+    if [ $skip = false ]; then
+        if
+            az storage blob upload --account-name "$storage_account" \
+                --account-key "${keys_array[0]}" -c "$container" -f "$file" \
+                -n "$name" --overwrite "$overwrite" >/dev/null 2>&1
+        then
+            echo The file was uploaded correctly.
+        else
+            echo There was an error trying to upload the file.
+        fi
+    fi
 }
 
 #---------------------------------------END FILE UPLOAD SETUP---------------------------------------#
-
 setup
 check_file_exists "$@"
+echo
+echo "REGION SETUP"
 select_region
+echo RESOURCE GROUP SETUP
 rg_setup
+echo STORAGE ACCOUNT SETUP
 sa_setup
+echo CONTAINER SETUP
 container_setup
+echo FILE UPLOAD
 upload_file "$@"
